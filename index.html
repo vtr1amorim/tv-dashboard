@@ -1,0 +1,717 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Monitor de Status dos Aplicativos — Sarandi Tratores</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --navy:    #0B1A35;
+      --navy2:   #132040;
+      --navy3:   #1B3A6B;
+      --navy4:   #2D5499;
+      --border:  #1E3A6B;
+      --text:    #E8EEF8;
+      --muted:   #7A98C4;
+      --gold:    #F5C518;
+      --green:   #22C55E;
+      --red:     #EF4444;
+      --yellow:  #F59E0B;
+      --blue:    #3B82F6;
+    }
+    *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--navy);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    header {
+      display:flex; align-items:center; justify-content:space-between;
+      padding:10px 28px;
+      background:rgba(11,26,53,.98);
+      border-bottom:2px solid var(--navy3);
+      flex-shrink:0; gap:16px;
+    }
+    .h-brand { display:flex; align-items:center; gap:14px; }
+    .h-sub   { font-size:.75rem; color:var(--muted); line-height:1.3; }
+    .h-sub strong { color:var(--text); font-size:.8rem; display:block; }
+
+    .h-center { display:flex; flex-direction:column; align-items:center; gap:3px; }
+    .h-title  { font-size:1rem; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:var(--gold); }
+
+    .global-bar {
+      display:flex; align-items:center; gap:7px;
+      padding:4px 14px; border-radius:30px;
+      font-size:.72rem; font-weight:700; letter-spacing:.5px;
+      transition: all .4s;
+    }
+    .global-bar.all-ok   { background:rgba(34,197,94,.1);  color:var(--green);  border:1px solid rgba(34,197,94,.3); }
+    .global-bar.has-err  { background:rgba(239,68,68,.1);  color:var(--red);    border:1px solid rgba(239,68,68,.3); }
+    .global-bar.has-slow { background:rgba(245,158,11,.1); color:var(--yellow); border:1px solid rgba(245,158,11,.3); }
+
+    .h-right  { display:flex; align-items:center; gap:18px; }
+    #clock    { font-size:1.6rem; font-weight:700; font-variant-numeric:tabular-nums; color:var(--text); letter-spacing:2px; }
+    #clock-date { font-size:.72rem; color:var(--muted); text-align:right; margin-top:2px; }
+    #last-check-lbl { font-size:.65rem; color:var(--muted); text-align:center; margin-top:2px; }
+
+    .refresh-ring { width:46px; height:46px; flex-shrink:0; position:relative; cursor:pointer; }
+    .refresh-ring svg { width:100%; height:100%; transform:rotate(-90deg); }
+    .rr-track { fill:none; stroke:var(--border); stroke-width:3; }
+    .rr-fill  { fill:none; stroke:var(--gold); stroke-width:3;
+                stroke-dasharray:32 94; stroke-dashoffset:0;
+                animation:rr-live 1.4s linear infinite; stroke-linecap:round; }
+    @keyframes rr-live { to { stroke-dashoffset:-126; } }
+    .rr-label {
+      position:absolute; inset:0;
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      font-size:.65rem; font-weight:700; color:var(--gold); line-height:1;
+    }
+    .rr-label .rr-n { font-size:.95rem; }
+
+    main {
+      flex:1; display:flex; flex-direction:column; gap:10px;
+      padding:12px 18px 8px; overflow:hidden;
+    }
+
+    .cards-row {
+      display:grid; grid-template-columns:repeat(3,1fr); gap:12px;
+      flex:1; min-height:0;
+    }
+
+    .site-card {
+      background:var(--navy2); border:1px solid var(--border);
+      border-radius:16px; padding:16px 18px 12px;
+      display:flex; flex-direction:column; gap:8px;
+      position:relative; overflow:hidden;
+      transition:border-color .4s, box-shadow .4s;
+    }
+    .site-card.online  { border-color:var(--green);  box-shadow:0 0 20px rgba(34,197,94,.08); }
+    .site-card.offline { border-color:var(--red);    box-shadow:0 0 20px rgba(239,68,68,.08); }
+    .site-card.slow    { border-color:var(--yellow); box-shadow:0 0 20px rgba(245,158,11,.08); }
+    .site-card.checking{ border-color:var(--border); }
+
+    .card-strip {
+      position:absolute; top:0; left:0; right:0; height:4px; border-radius:16px 16px 0 0;
+      transition:background .4s;
+    }
+    .online  .card-strip { background:linear-gradient(90deg,var(--green),#4ADE80); }
+    .offline .card-strip { background:linear-gradient(90deg,var(--red),#F87171);   }
+    .slow    .card-strip { background:linear-gradient(90deg,var(--yellow),#FCD34D); }
+    .checking .card-strip { background:var(--border); }
+
+    .card-head { display:flex; align-items:flex-start; justify-content:space-between; }
+    .card-name { font-size:1.2rem; font-weight:800; }
+    .card-url  { font-size:.65rem; color:var(--muted); margin-top:2px; word-break:break-all; }
+
+    .status-badge {
+      display:flex; align-items:center; gap:6px;
+      padding:5px 12px; border-radius:30px;
+      font-size:.75rem; font-weight:700; letter-spacing:.5px; flex-shrink:0;
+    }
+    .online   .status-badge { background:rgba(34,197,94,.15);  color:var(--green);  border:1px solid var(--green);  }
+    .offline  .status-badge { background:rgba(239,68,68,.15);  color:var(--red);    border:1px solid var(--red);    }
+    .slow     .status-badge { background:rgba(245,158,11,.15); color:var(--yellow); border:1px solid var(--yellow); }
+    .checking .status-badge { background:rgba(255,255,255,.05); color:var(--muted); border:1px solid var(--border); }
+
+    .status-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+    .online   .status-dot { background:var(--green);  animation:pulse-g 1.5s infinite; }
+    .offline  .status-dot { background:var(--red);    animation:pulse-r 1s   infinite; }
+    .slow     .status-dot { background:var(--yellow); animation:pulse-y 2s   infinite; }
+    .checking .status-dot { background:var(--muted); }
+
+    @keyframes pulse-g { 0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.6)}  50%{box-shadow:0 0 0 7px rgba(34,197,94,0)}  }
+    @keyframes pulse-r { 0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.7)}  50%{box-shadow:0 0 0 8px rgba(239,68,68,0)}  }
+    @keyframes pulse-y { 0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,.6)} 50%{box-shadow:0 0 0 7px rgba(245,158,11,0)} }
+
+    .card-latency-block { display:flex; align-items:baseline; gap:6px; }
+    .latency-val {
+      font-size:2.6rem; font-weight:900; line-height:1;
+      font-variant-numeric:tabular-nums; transition:color .4s;
+    }
+    .online   .latency-val { color:var(--green); }
+    .offline  .latency-val { color:var(--red);   }
+    .slow     .latency-val { color:var(--yellow);}
+    .checking .latency-val { color:var(--muted); }
+    .latency-unit { font-size:.88rem; color:var(--muted); font-weight:600; }
+
+    .card-stats { display:flex; gap:8px; }
+    .stat-box {
+      flex:1; background:rgba(0,0,0,.2); border-radius:8px;
+      padding:7px 8px; text-align:center; border:1px solid rgba(255,255,255,.05);
+    }
+    .stat-box .sv { font-size:1rem; font-weight:700; }
+    .stat-box .sl { font-size:.62rem; color:var(--muted); margin-top:1px; letter-spacing:.3px; }
+    .sv.ok   { color:var(--green);  }
+    .sv.warn { color:var(--yellow); }
+    .sv.err  { color:var(--red);    }
+    .sv.neu  { color:var(--text);   }
+
+    .chart-wrap {
+      flex:1; min-height:0; position:relative;
+      background:rgba(0,0,0,.15); border-radius:6px; padding:4px 6px 2px;
+    }
+    .chart-wrap canvas { display:block; }
+
+    .bottom-row {
+      display:grid; grid-template-columns:1fr 1.6fr; gap:12px;
+      height:136px; flex-shrink:0;
+    }
+    .panel {
+      background:var(--navy2); border:1px solid var(--border);
+      border-radius:12px; padding:10px 14px;
+      display:flex; flex-direction:column; gap:6px; overflow:hidden;
+    }
+    .panel-title {
+      font-size:.68rem; font-weight:700; letter-spacing:1.5px;
+      text-transform:uppercase; color:var(--gold);
+    }
+
+    #incident-log { flex:1; overflow:hidden; display:flex; flex-direction:column; gap:2px; }
+    .inc-row {
+      display:flex; align-items:center; gap:8px;
+      font-size:.7rem; padding:2px 0;
+      border-bottom:1px solid rgba(255,255,255,.04);
+    }
+    .inc-time { color:var(--muted); flex-shrink:0; font-variant-numeric:tabular-nums; width:46px; }
+    .inc-site { color:var(--text); font-weight:600; width:72px; flex-shrink:0; }
+    .inc-msg  { color:var(--muted); flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .inc-dot  { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+    .inc-dot.up   { background:var(--green);  }
+    .inc-dot.down { background:var(--red);    }
+    .inc-dot.slow { background:var(--yellow); }
+    .no-inc { font-size:.73rem; color:var(--muted); margin:auto; text-align:center; }
+
+    .combined-chart-wrap { flex:1; min-height:0; position:relative; }
+
+    .spin { display:inline-block; animation:spin .8s linear infinite; }
+    @keyframes spin { to{transform:rotate(360deg)} }
+
+    #fs-btn {
+      position:fixed; bottom:12px; right:16px;
+      background:rgba(255,255,255,.06); border:1px solid var(--border);
+      border-radius:8px; padding:6px 12px; font-size:.72rem;
+      color:var(--muted); cursor:pointer; z-index:100; transition:background .2s;
+    }
+    #fs-btn:hover { background:var(--navy3); color:var(--text); }
+
+    @media(min-width:1600px){
+      .card-name    { font-size:1.4rem; }
+      .latency-val  { font-size:3.2rem; }
+      #clock        { font-size:2rem;   }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="h-brand">
+    <img src="Logo HD.png" alt="Sarandi Tratores" style="height:38px;object-fit:contain;">
+    <div>
+      <div class="h-sub">
+        <strong>Monitor de Status dos Aplicativos</strong>
+        Sistemas Web &middot; TI
+      </div>
+    </div>
+  </div>
+
+  <div class="h-center">
+    <div class="h-title">&#x26A1; Monitor de Status dos Aplicativos</div>
+    <div id="global-status-bar" class="global-bar all-ok">
+      <span>&#x25CF;</span><span id="global-status-txt">Verificando...</span>
+    </div>
+  </div>
+
+  <div class="h-right">
+    <div style="text-align:right">
+      <div id="clock">--:--:--</div>
+      <div id="clock-date">--/--/----</div>
+      <div id="last-check-lbl">&#218;ltima verifica&#231;&#227;o: --</div>
+    </div>
+    <div class="refresh-ring" id="refresh-ring" title="Clique para verificar agora">
+      <svg viewBox="0 0 46 46">
+        <circle class="rr-track" cx="23" cy="23" r="20"/>
+        <circle class="rr-fill"  cx="23" cy="23" r="20"/>
+      </svg>
+      <div class="rr-label"><span style="font-size:.65rem;letter-spacing:.5px">LIVE</span></div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="cards-row" id="cards-row"></div>
+
+  <div class="bottom-row">
+    <div class="panel">
+      <div class="panel-title">&#x1F4CB; Log de Incidentes</div>
+      <div id="incident-log"><div class="no-inc">Nenhum incidente registrado.</div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">&#x1F4C8; Lat&#234;ncia Comparativa &#8212; Todos os Sistemas</div>
+      <div class="combined-chart-wrap">
+        <canvas id="combined-chart"></canvas>
+      </div>
+    </div>
+  </div>
+</main>
+
+<button id="fs-btn" onclick="toggleFS()">&#x26F6; Tela Cheia</button>
+
+<script>
+const SITES = [
+  { id:'oficina', name:'Oficina',  url:'https://oficina.saranditratores.dev.br/',  icon:'\uD83D\uDD27', desc:'Sistema de Ordem de Servi\u00E7o',   color:'#22C55E' },
+  { id:'coletor', name:'Coletor',  url:'https://coletor.saranditratores.dev.br/',  icon:'\uD83D\uDCF1', desc:'Coletor de Notas Fiscais',            color:'#3B82F6' },
+  { id:'vendedor',name:'Vendedor', url:'https://vendedor.saranditratores.dev.br',  icon:'\uD83D\uDCBC', desc:'Portal do Vendedor',                  color:'#A855F7' }
+];
+
+const INTERVAL       = 10;   // segundos por ciclo de verificacao por site
+const TIMEOUT_MS     = 8000;  // 8s timeout por request
+const SLOW_THRESHOLD = 2000;
+const HISTORY_MAX    = 30;
+const CF_THRESHOLD   = 100;   // ms — CF retorna pagina de erro em 30-80ms; origens reais levam 100ms+
+
+const state = {};
+SITES.forEach(s => {
+  state[s.id] = { status:'checking', latency:null, history:[], checkCount:0, upCount:0, downCount:0 };
+});
+const incidents  = [];
+const chartInst  = {};
+let combinedChart = null;
+
+/* BUILD CARDS */
+const cardsRow = document.getElementById('cards-row');
+SITES.forEach(s => {
+  const card = document.createElement('div');
+  card.className = 'site-card checking';
+  card.id = 'card-' + s.id;
+  card.innerHTML =
+    '<div class="card-strip"></div>' +
+    '<div class="card-head">' +
+      '<div>' +
+        '<div class="card-name">' + s.icon + ' ' + s.name + '</div>' +
+        '<div class="card-url">' + s.url + '</div>' +
+        '<div style="font-size:.65rem;color:var(--muted);margin-top:2px">' + s.desc + '</div>' +
+      '</div>' +
+      '<div class="status-badge" id="badge-' + s.id + '">' +
+        '<div class="status-dot"></div>' +
+        '<span id="badge-txt-' + s.id + '">VERIFICANDO</span>' +
+      '</div>' +
+    '</div>' +
+    '<div class="card-latency-block">' +
+      '<div class="latency-val" id="lat-' + s.id + '"><span class="spin">\u27F3</span></div>' +
+      '<div class="latency-unit" id="lat-unit-' + s.id + '"></div>' +
+    '</div>' +
+    '<div class="card-stats">' +
+      '<div class="stat-box"><div class="sv neu" id="uptime-' + s.id + '">--%</div><div class="sl">UPTIME</div></div>' +
+      '<div class="stat-box"><div class="sv neu" id="avg-'    + s.id + '">-- ms</div><div class="sl">M\u00C9DIA</div></div>' +
+      '<div class="stat-box"><div class="sv neu" id="checks-' + s.id + '">0</div><div class="sl">VERIFICA\u00C7\u00D5ES</div></div>' +
+      '<div class="stat-box"><div class="sv neu" id="since-'  + s.id + '">--:--</div><div class="sl">\u00DALTIMA</div></div>' +
+    '</div>' +
+    '<div class="chart-wrap"><canvas id="chart-' + s.id + '"></canvas></div>';
+  cardsRow.appendChild(card);
+  initSiteChart(s);
+});
+
+/* CHART.JS HELPERS */
+function hexToRgb(hex) {
+  return parseInt(hex.slice(1,3),16) + ',' + parseInt(hex.slice(3,5),16) + ',' + parseInt(hex.slice(5,7),16);
+}
+
+function initSiteChart(site) {
+  const canvas = document.getElementById('chart-' + site.id);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const rgb = hexToRgb(site.color);
+  const grad = ctx.createLinearGradient(0, 0, 0, 100);
+  grad.addColorStop(0, 'rgba(' + rgb + ',.45)');
+  grad.addColorStop(1, 'rgba(' + rgb + ',.02)');
+
+  chartInst[site.id] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label: 'Lat\u00EAncia (ms)',
+          data: [],
+          borderColor: site.color,
+          backgroundColor: grad,
+          fill: true,
+          tension: 0.45,
+          borderWidth: 2.5,
+          pointRadius: 3,
+          pointHoverRadius: 7,
+          pointBackgroundColor: [],
+          pointBorderColor: 'rgba(255,255,255,.5)',
+          pointBorderWidth: 1.5,
+          spanGaps: false
+        },
+        {
+          label: 'Limite Lento (2s)',
+          data: [],
+          borderColor: 'rgba(245,158,11,.4)',
+          borderDash: [5,4],
+          borderWidth: 1,
+          pointRadius: 0,
+          pointHoverRadius: 0,
+          fill: false,
+          tension: 0
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 500, easing: 'easeInOutQuart' },
+      interaction: { intersect: false, mode: 'index' },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(11,26,53,.95)',
+          borderColor: site.color,
+          borderWidth: 1,
+          titleColor: '#E8EEF8',
+          bodyColor: '#7A98C4',
+          padding: 10,
+          callbacks: {
+            label: function(item) {
+              if (item.datasetIndex === 1) return null;
+              return item.raw === null ? ' Offline / Timeout' : ' ' + item.raw + ' ms';
+            }
+          },
+          filter: function(item) { return item.datasetIndex === 0; }
+        }
+      },
+      scales: {
+        x: {
+          grid:  { color:'rgba(255,255,255,.05)', drawBorder:false },
+          ticks: { color:'#7A98C4', font:{ size:9 }, maxTicksLimit:6, maxRotation:0 },
+          border:{ display:false }
+        },
+        y: {
+          min: 0,
+          suggestedMax: 200,
+          grid:  { color:'rgba(255,255,255,.06)', drawBorder:false },
+          ticks: { color:'#7A98C4', font:{ size:9 }, callback: function(v){ return v+'ms'; }, maxTicksLimit:4 },
+          border:{ display:false }
+        }
+      }
+    }
+  });
+}
+
+function initCombinedChart() {
+  const ctx = document.getElementById('combined-chart').getContext('2d');
+  combinedChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: SITES.map(function(s) {
+        return {
+          label: s.name,
+          data: [],
+          borderColor: s.color,
+          backgroundColor: 'transparent',
+          fill: false,
+          tension: 0.45,
+          borderWidth: 2,
+          pointRadius: 2.5,
+          pointHoverRadius: 6,
+          pointBackgroundColor: s.color,
+          spanGaps: false
+        };
+      })
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 500, easing: 'easeInOutQuart' },
+      interaction: { intersect: false, mode: 'index' },
+      plugins: {
+        legend: {
+          display: true, position: 'top', align: 'end',
+          labels: { color:'#7A98C4', font:{ size:10 }, boxWidth:12, padding:12,
+                    usePointStyle:true, pointStyle:'circle' }
+        },
+        tooltip: {
+          backgroundColor: 'rgba(11,26,53,.95)',
+          borderColor: 'rgba(255,255,255,.1)',
+          borderWidth: 1,
+          titleColor: '#E8EEF8',
+          bodyColor: '#7A98C4',
+          padding: 10,
+          callbacks: {
+            label: function(item) {
+              return item.raw === null
+                ? ' ' + item.dataset.label + ': Offline'
+                : ' ' + item.dataset.label + ': ' + item.raw + ' ms';
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid:  { color:'rgba(255,255,255,.04)', drawBorder:false },
+          ticks: { color:'#7A98C4', font:{ size:8 }, maxTicksLimit:8, maxRotation:0 },
+          border:{ display:false }
+        },
+        y: {
+          min: 0,
+          suggestedMax: 200,
+          grid:  { color:'rgba(255,255,255,.05)', drawBorder:false },
+          ticks: { color:'#7A98C4', font:{ size:8 }, callback: function(v){ return v+'ms'; }, maxTicksLimit:4 },
+          border:{ display:false }
+        }
+      }
+    }
+  });
+}
+
+const statusColors = { online:'#22C55E', offline:'#EF4444', slow:'#F59E0B', checking:'#7A98C4' };
+
+function tsLabel(d) {
+  return d.getHours().toString().padStart(2,'0') + ':' +
+         d.getMinutes().toString().padStart(2,'0') + ':' +
+         d.getSeconds().toString().padStart(2,'0');
+}
+
+function updateSiteChart(site, st) {
+  var chart = chartInst[site.id];
+  if (!chart) return;
+  var labels    = st.history.map(function(h){ return tsLabel(h.ts); });
+  var values    = st.history.map(function(h){ return h.latency; });
+  var ptColors  = st.history.map(function(h){ return statusColors[h.status] || '#7A98C4'; });
+  var threshold = st.history.map(function(){ return 200; });
+  chart.data.labels = labels;
+  chart.data.datasets[0].data = values;
+  chart.data.datasets[0].pointBackgroundColor = ptColors;
+  chart.data.datasets[1].data = threshold;
+  chart.data.datasets[0].borderColor = statusColors[st.status] || site.color;
+  chart.update('active');
+}
+
+function updateCombinedChart() {
+  if (!combinedChart) return;
+  var longest = SITES.reduce(function(a,b){
+    return state[a.id].history.length >= state[b.id].history.length ? a : b;
+  });
+  combinedChart.data.labels = state[longest.id].history.map(function(h){ return tsLabel(h.ts); });
+  SITES.forEach(function(s, i){
+    combinedChart.data.datasets[i].data = state[s.id].history.map(function(h){ return h.latency; });
+  });
+  combinedChart.update('active');
+}
+
+/* ── PROBE HELPERS ────────────────────────────────────────────────────────
+   Problema Cloudflare: mesmo com a ORIGEM fora do ar, a borda CF responde
+   com uma pagina de erro (521/522/523/524) em < ~200ms.
+   Com fetch no-cors nao conseguimos ler o status HTTP — a resposta e sempre
+   "opaca". A solucao: rodar fetch + img em paralelo e usar TIMING como
+   heuristica. Paginas de erro CF chegam em < CF_THRESHOLD ms; respostas
+   reais da origem levam mais tempo (origem precisa processar a requisicao).
+   Se AMBAS as sondas terminam em < CF_THRESHOLD E o favicon nao carregou
+   → identificamos a pagina de erro CF → OFFLINE.
+──────────────────────────────────────────────────────────────────────── */
+
+/* Sonda 1: img probe — Sec-Fetch-Dest:image contorna bloqueios WAF
+   onload OU onerror = servidor respondeu (HTML nao e imagem = onerror esperado)
+   Somente o timeout de 8s sem NENHUMA resposta = inacessivel */
+function imgProbe(url) {
+  return new Promise(function(resolve) {
+    var t0 = performance.now(), img = new Image(), done = false;
+    function finish(responded) {
+      if (done) return; done = true; img.src = '';
+      resolve(responded ? { latency: Math.round(performance.now() - t0) } : null);
+    }
+    var t = setTimeout(function(){ finish(false); }, TIMEOUT_MS);
+    img.onload  = function(){ clearTimeout(t); finish(true); };
+    img.onerror = function(){ clearTimeout(t); finish(true); };  // HTML recebido = online
+    // URL raiz com cache-buster (HTML dinamico, nao cacheado pelo CF edge)
+    img.src = url + (url.endsWith('/') ? '' : '/') + '?_p=' + Date.now();
+  });
+}
+
+/* Sonda 2: fetch no-cors com cache-buster */
+function fetchProbe(url) {
+  return new Promise(function(resolve) {
+    var t0 = performance.now();
+    var ctrl = new AbortController();
+    var t = setTimeout(function(){ ctrl.abort(); resolve(null); }, TIMEOUT_MS);
+    // Sem cache-buster: URL com query param pode disparar WAF do Cloudflare.
+    // HTML de web apps nao e cacheado pelo CF por padrao, entao o fetch
+    // sempre chega na origem (quando no ar) ou retorna erro de borda (rapido).
+    fetch(url, { mode:'no-cors', signal:ctrl.signal })
+      .then(function(r) {
+        clearTimeout(t);
+        resolve({ latency: Math.round(performance.now() - t0), redirected: r.redirected });
+      })
+      .catch(function() { clearTimeout(t); resolve(null); });
+  });
+}
+
+/* CHECK SITE — deteccao multi-metodo com heuristica Cloudflare */
+async function checkSite(site) {
+  var st = state[site.id];
+  var now = new Date();
+  var online = false, latency = null;
+
+  // Duas sondas em paralelo — a primeira com resultado nao-nulo vence:
+  // fetchProbe: leve, sem baixar corpo. Pode ser bloqueado por WAF em alguns dominios.
+  // imgProbe:  usa Sec-Fetch-Dest:image. onerror = HTML recebido = online.
+  // Se AMBAS retornarem null apos 8s = dominio completamente inacessivel = OFFLINE.
+  var fp = fetchProbe(site.url);
+  var ip = imgProbe(site.url);
+
+  var result = await new Promise(function(res) {
+    var done = false;
+    function tryDone(val) { if (!done && val !== null) { done = true; res(val); } }
+    fp.then(tryDone);
+    ip.then(tryDone);
+    Promise.all([fp, ip]).then(function() { if (!done) res(null); });
+  });
+
+  if (result) {
+    online = true;
+    latency = result.latency;
+  }
+
+  var prevStatus = st.status;
+  var newStatus = !online ? 'offline' : latency > SLOW_THRESHOLD ? 'slow' : 'online';
+  st.status = newStatus; st.latency = latency; st.checkCount++;
+  if (online) st.upCount++; else st.downCount++;
+  st.history.push({ ts: now, latency: latency, status: newStatus });
+  if (st.history.length > HISTORY_MAX) st.history.shift();
+  if (prevStatus !== 'checking' && prevStatus !== newStatus) {
+    var msg = newStatus === 'online'
+      ? '\u2705 Voltou ao ar (' + latency + 'ms)'
+      : newStatus === 'slow' ? '\u26A0\uFE0F Lento \u2014 ' + latency + 'ms' : '\uD83D\uDD34 Ficou offline';
+    incidents.unshift({ time:now, site:site.name, msg:msg,
+      type: newStatus === 'online' ? 'up' : newStatus === 'offline' ? 'down' : 'slow' });
+    if (incidents.length > 20) incidents.pop();
+  }
+  updateCard(site, st);
+  // Atualiza grafico comparativo imediatamente apos cada site individual
+  updateCombinedChart();
+  updateLog();
+  updateGlobalStatus();
+}
+
+/* UPDATE CARD UI */
+function updateCard(site, st) {
+  var card = document.getElementById('card-' + site.id);
+  card.className = 'site-card ' + st.status;
+  var labels = { online:'ONLINE', offline:'OFFLINE', slow:'LENTO', checking:'VERIFICANDO' };
+  document.getElementById('badge-txt-' + site.id).textContent = labels[st.status];
+  var latEl = document.getElementById('lat-' + site.id);
+  var unitEl = document.getElementById('lat-unit-' + site.id);
+  if (st.status === 'checking') {
+    latEl.innerHTML = '<span class="spin">\u27F3</span>'; unitEl.textContent = '';
+  } else if (st.status === 'offline') {
+    latEl.textContent = 'TIMEOUT'; unitEl.textContent = '';
+  } else {
+    latEl.textContent = st.latency; unitEl.textContent = 'ms';
+  }
+  var uptime = st.checkCount ? Math.round((st.upCount / st.checkCount) * 100) : 0;
+  var onH = st.history.filter(function(h){ return h.latency !== null; });
+  var avg = onH.length ? Math.round(onH.reduce(function(a,b){ return a + b.latency; }, 0) / onH.length) : null;
+  var uptEl = document.getElementById('uptime-' + site.id);
+  uptEl.textContent = uptime + '%';
+  uptEl.className = 'sv ' + (uptime >= 98 ? 'ok' : uptime >= 90 ? 'warn' : 'err');
+  var avgEl = document.getElementById('avg-' + site.id);
+  avgEl.textContent = avg !== null ? avg + ' ms' : '-- ms';
+  avgEl.className = 'sv ' + (avg === null ? 'err' : avg < 800 ? 'ok' : avg < 2000 ? 'warn' : 'err');
+  document.getElementById('checks-' + site.id).textContent = st.checkCount;
+  var now = new Date();
+  document.getElementById('since-' + site.id).textContent = tsLabel(now);
+  updateSiteChart(site, st);
+}
+
+/* INCIDENT LOG */
+function updateLog() {
+  var el = document.getElementById('incident-log');
+  if (!incidents.length) {
+    el.innerHTML = '<div class="no-inc">Nenhum incidente registrado nesta sess\u00E3o.</div>';
+    return;
+  }
+  el.innerHTML = incidents.slice(0,6).map(function(inc) {
+    return '<div class="inc-row">' +
+      '<div class="inc-dot ' + inc.type + '"></div>' +
+      '<div class="inc-time">' + tsLabel(inc.time) + '</div>' +
+      '<div class="inc-site">' + inc.site + '</div>' +
+      '<div class="inc-msg">' + inc.msg + '</div>' +
+      '</div>';
+  }).join('');
+}
+
+/* GLOBAL STATUS */
+function updateGlobalStatus() {
+  var onlineCount = 0;
+  SITES.forEach(function(s){
+    if (state[s.id].status === 'online' || state[s.id].status === 'slow') onlineCount++;
+  });
+  var bar = document.getElementById('global-status-bar');
+  var txt = document.getElementById('global-status-txt');
+  if (onlineCount === SITES.length) {
+    bar.className = 'global-bar all-ok';
+    txt.textContent = 'Todos os sistemas operacionais';
+  } else if (onlineCount === 0) {
+    bar.className = 'global-bar has-err';
+    txt.textContent = 'TODOS OS SISTEMAS OFFLINE';
+  } else {
+    bar.className = 'global-bar has-slow';
+    txt.textContent = (SITES.length - onlineCount) + ' sistema(s) com problema';
+  }
+  document.getElementById('last-check-lbl').textContent =
+    '\u00DAltima verifica\u00E7\u00E3o: ' + tsLabel(new Date());
+}
+
+/* FORCCAR VERIFICACAO (clique no anel) */
+document.getElementById('refresh-ring').addEventListener('click', function(){
+  SITES.forEach(function(s){ checkSite(s); });
+});
+
+/* CLOCK */
+function updateClock() {
+  var now = new Date();
+  document.getElementById('clock').textContent = tsLabel(now);
+  document.getElementById('clock-date').textContent =
+    now.toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit',month:'short',year:'numeric'});
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+/* FULLSCREEN */
+function toggleFS() {
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(function(){});
+  else document.exitFullscreen();
+}
+document.addEventListener('fullscreenchange', function(){
+  document.getElementById('fs-btn').textContent =
+    document.fullscreenElement ? '\u2715 Sair Tela Cheia' : '\u26F6 Tela Cheia';
+  setTimeout(function(){
+    Object.values(chartInst).forEach(function(c){ c.resize(); });
+    if (combinedChart) combinedChart.resize();
+  }, 200);
+});
+
+/* INIT - loops independentes por site, escalonados para atualizacoes continuas */
+initCombinedChart();
+var STAGGER = Math.floor(INTERVAL * 1000 / SITES.length);
+SITES.forEach(function(site, i) {
+  setTimeout(function siteLoop() {
+    checkSite(site).then(
+      function(){ setTimeout(siteLoop, INTERVAL * 1000); },
+      function(){ setTimeout(siteLoop, INTERVAL * 1000); }
+    );
+  }, i * STAGGER);
+});
+</script>
+</body>
+</html>
